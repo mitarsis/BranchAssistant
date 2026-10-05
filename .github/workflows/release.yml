@@ -1,0 +1,117 @@
+name: Release
+
+# Триггер: пуш тега вида v0.1.0, v1.2.3 и т.д.
+# Также можно триггерить вручную через GitHub UI (Actions → Run workflow).
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag name (e.g. v0.1.0)'
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref }}
+  cancel-in-progress: false  # релизы не отменяем
+
+permissions:
+  contents: write   # нужно для создания GitHub Release
+
+jobs:
+  build:
+    name: Build & Publish Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Для auto-generated release notes — полная история
+          fetch-depth: 0
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: release-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: release-gradle-
+
+      - name: Use preinstalled Android SDK
+        run: |
+          echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=/usr/local/lib/android/sdk" >> $GITHUB_ENV
+
+      - name: Ensure Android build-tools 35
+        run: |
+          if [ ! -d "$ANDROID_HOME/build-tools/35.0.0" ]; then
+            yes | sdkmanager "build-tools;35.0.0" "platforms;android-35" "platform-tools"
+          fi
+
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
+      - name: Determine version
+        id: version
+        # Берём версию из имени тега (v0.1.0 → 0.1.0). Для ручного запуска — из input.
+        run: |
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            VERSION="${{ github.event.inputs.tag }}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/}"
+          fi
+          VERSION="${VERSION#v}"   # strip leading 'v'
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Bump version in build.gradle.kts
+        # Меняем versionName / versionCode в app/build.gradle.kts на лету,
+        # не трогая файлы в репо.
+        run: |
+          ${{ steps.version.outputs.version }}
+          sed -i.bak "s/^    versionName = \".*\"/    versionName = \"${{ steps.version.outputs.version }}\"/" app/build.gradle.kts
+          sed -i.bak "s/^    versionCode = .*/    versionCode = $(date +%s | tail -c 5)/" app/build.gradle.kts
+          rm app/build.gradle.kts.bak
+          echo "--- updated build.gradle.kts ---"
+          grep -E "versionName|versionCode" app/build.gradle.kts
+
+      - name: Build debug APK
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Rename APK to readable name
+        run: |
+          mv app/build/outputs/apk/debug/app-debug.apk "branch-assistant-${{ steps.version.outputs.version }}.apk"
+          ls -la branch-assistant-*.apk
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "Branch Assistant v${{ steps.version.outputs.version }}"
+          # Auto-generate notes from commits since previous tag
+          generate_release_notes: true
+          # Если тег был создан не вручную — публикуем сразу
+          draft: false
+          prerelease: false
+          files: |
+            branch-assistant-*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload APK as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-apk
+          path: branch-assistant-*.apk
+          if-no-files-found: error
