@@ -1,5 +1,7 @@
 # Branch Assistant
 
+[![CI](https://github.com/mitarsis/BranchAssistant/actions/workflows/ci.yml/badge.svg)](https://github.com/mitarsis/BranchAssistant/actions/workflows/ci.yml)
+
 Android-голосовой ИИ-ассистент с **ветвящимися беседами**. Нативно на Kotlin +
 Jetpack Compose, работает с **MiniMax API** (OpenAI-совместимый протокол, стриминг
 по SSE).
