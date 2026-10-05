@@ -79,7 +79,6 @@ jobs:
         # Меняем versionName / versionCode в app/build.gradle.kts на лету,
         # не трогая файлы в репо.
         run: |
-          ${{ steps.version.outputs.version }}
           sed -i.bak "s/^    versionName = \".*\"/    versionName = \"${{ steps.version.outputs.version }}\"/" app/build.gradle.kts
           sed -i.bak "s/^    versionCode = .*/    versionCode = $(date +%s | tail -c 5)/" app/build.gradle.kts
           rm app/build.gradle.kts.bak
