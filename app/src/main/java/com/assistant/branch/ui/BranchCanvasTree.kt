@@ -5,7 +5,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -15,6 +18,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -53,6 +60,12 @@ fun BranchCanvasTree(
     onLongPress: (BranchNodeInfo) -> Unit = {},
 ) {
     if (nodes.isEmpty()) return
+
+    // Двойной тап по ноде разворачивает её на весь экран с прокруткой. null =
+    // ничего не развёрнуто. Состояние живёт в BranchCanvasTree, потому что
+    // overlay должен рендериться поверх всех нод (zIndex выше).
+    var expandedNodeId by remember { mutableStateOf<String?>(null) }
+    val expandedNode = expandedNodeId?.let { id -> nodes.firstOrNull { it.id == id } }
 
     val childMap = remember(nodes) { nodes.groupBy { it.parentId } }
     val roots = remember(nodes) { nodes.filter { it.parentId == null }.ifEmpty { listOf(nodes.first()) } }
@@ -216,7 +229,17 @@ fun BranchCanvasTree(
                 },
                 onClick = { onSelect(n.id) },
                 onLongPress = { onLongPress(n) },
+                onDoubleTap = { expandedNodeId = n.id },
                 modifier = Modifier.zIndex(1f),
+            )
+        }
+        // Overlay для развёрнутой ноды. Рендерится поверх всех нод (zIndex
+        // выше) и блокирует pan холста (есть свой pointerInput на onClose).
+        if (expandedNode != null) {
+            ExpandedNodeOverlay(
+                node = expandedNode,
+                onClose = { expandedNodeId = null },
+                modifier = Modifier.zIndex(10f),
             )
         }
     }
@@ -235,6 +258,7 @@ private fun NodeCard(
     onResize: (Float, Float) -> Unit,
     onClick: () -> Unit,
     onLongPress: () -> Unit,
+    onDoubleTap: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
@@ -271,6 +295,7 @@ private fun NodeCard(
                 detectTapGestures(
                     onTap = { onClick() },
                     onLongPress = { onLongPress() },
+                    onDoubleTap = { onDoubleTap() },
                 )
             },
     ) {
@@ -334,5 +359,76 @@ private fun NodeCard(
                     }
                 },
         )
+    }
+}
+
+/**
+ * Full-screen overlay с развёрнутым текстом ноды. Тот же стиль карточки,
+ * но во весь экран с прокруткой и кнопкой закрытия (×) в правом верхнем углу.
+ * Тап по затемнённому фону тоже закрывает overlay.
+ */
+@Composable
+private fun ExpandedNodeOverlay(
+    node: BranchNodeInfo,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val textBg = if (node.isUser) Color(0xFF2C3242) else Color(0xFF1B1F29)
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color(0xCC000000))
+            .pointerInput(Unit) {
+                // Тап по затемнению — закрыть. Сам контент перехватывает тапы.
+                detectTapGestures(onTap = { onClose() })
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(textBg)
+                .border(
+                    width = 2.dp,
+                    color = if (node.isActive) Color(0xFF7C5CFF) else Color(0xFF5C5C70),
+                    shape = RoundedCornerShape(16.dp),
+                )
+                .pointerInput(Unit) {
+                    // Перехватываем тапы внутри карточки, чтобы они не
+                    // закрывали overlay.
+                    detectTapGestures { /* swallow */ }
+                },
+        ) {
+            Column(modifier = Modifier.fillMaxSize().padding(20.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        text = if (node.isUser) "ВЫ" else "AI",
+                        color = Color(0xFF9AA1B1),
+                        fontSize = 12.sp,
+                    )
+                    IconButton(onClick = onClose) {
+                        Icon(
+                            Icons.Outlined.Close,
+                            contentDescription = "Закрыть",
+                            tint = Color(0xFF9AA1B1),
+                        )
+                    }
+                }
+                val scrollState = rememberScrollState()
+                Box(modifier = Modifier.fillMaxWidth().verticalScroll(scrollState)) {
+                    Text(
+                        text = node.fullText.ifBlank { node.preview }.ifBlank { "…" },
+                        color = Color(0xFFE6E8EE),
+                        fontSize = 16.sp,
+                    )
+                }
+            }
+        }
     }
 }
