@@ -68,7 +68,20 @@ fun BranchCanvasTree(
     val expandedNode = expandedNodeId?.let { id -> nodes.firstOrNull { it.id == id } }
 
     val childMap = remember(nodes) { nodes.groupBy { it.parentId } }
-    val roots = remember(nodes) { nodes.filter { it.parentId == null }.ifEmpty { listOf(nodes.first()) } }
+    // Roots — это parentId == null. Если таких нет, ищем orphan'ы: узлы, чей
+    // parentId указывает на несуществующий message. Показываем их как
+    // самостоятельные roots — лучше видеть «потерянную» ветку, чем маскировать
+    // её под нормальный корень.
+    val roots = remember(nodes) {
+        val explicitRoots = nodes.filter { it.parentId == null }
+        if (explicitRoots.isNotEmpty()) {
+            explicitRoots
+        } else {
+            val allIds = nodes.map { it.id }.toHashSet()
+            nodes.filter { it.parentId != null && it.parentId !in allIds }
+                .ifEmpty { listOf(nodes.first()) }
+        }
+    }
 
     val activeSet = activePath.toHashSet()
     val leafId = activePath.lastOrNull()

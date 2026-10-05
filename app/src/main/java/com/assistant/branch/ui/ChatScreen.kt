@@ -294,6 +294,9 @@ fun ChatScreen(
                                 },
                             )
                         }
+                        if (state.branchForest.isEmpty()) {
+                            item { EmptyState() }
+                        }
                     }
                 }
             }

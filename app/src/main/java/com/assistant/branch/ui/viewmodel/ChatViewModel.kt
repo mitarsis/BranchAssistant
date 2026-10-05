@@ -161,7 +161,7 @@ class ChatViewModel(
         if (tree.isEmpty()) return emptyList()
         if (current.isEmpty()) return findLeafPath(tree)
 
-        val allNodes = tree.flatMap { flatten(it) }
+        val allNodes = flatten(tree)
         val byId = allNodes.associateBy { it.message.id }
         if (current.any { it !in byId }) {
             // Часть пути удалена — fallback на самую свежую ветку
@@ -193,19 +193,32 @@ class ChatViewModel(
         return path
     }
 
-    private fun flatten(node: MessageNode): List<MessageNode> =
-        listOf(node) + node.children.flatMap { flatten(it) }
-
+    /**
+     * Находит «самую живую» ветку: проходит по всем листам дерева (узлам без
+     * детей) и возвращает путь до самого длинного. Если длина равная —
+     * побеждает самый свежий. Так находим самую длинную историю, а не
+     * самый свежий короткий корень.
+     */
     private fun findLeafPath(forest: List<MessageNode>): List<String> {
         if (forest.isEmpty()) return emptyList()
-        val path = mutableListOf<String>()
-        var node: MessageNode = forest.maxBy { it.message.createdAt }
-        while (true) {
-            path += node.message.id
-            val next = node.children.maxByOrNull { it.message.createdAt } ?: break
-            node = next
+
+        // Собираем все leaves: рекурсивно обходим дерево.
+        val allLeaves = mutableListOf<List<MessageNode>>()
+        fun collectLeaves(node: MessageNode, path: List<MessageNode>) {
+            val newPath = path + node
+            if (node.children.isEmpty()) {
+                allLeaves += newPath
+            } else {
+                node.children.forEach { collectLeaves(it, newPath) }
+            }
         }
-        return path
+        forest.forEach { collectLeaves(it, emptyList()) }
+        if (allLeaves.isEmpty()) return emptyList()
+
+        // Длиннейший путь → при равенстве — самый свежий leaf.
+        return allLeaves.maxWith(
+            compareBy({ it.size }, { -it.last().message.createdAt })
+        ).map { it.message.id }
     }
 
     fun updateDraft(text: String) {
@@ -423,9 +436,10 @@ class ChatViewModel(
     }
 
     private fun findMessageContent(forest: List<MessageNode>, messageId: String): String? =
-        flattenForest(forest).firstOrNull { it.message.id == messageId }?.message?.content
+        flatten(forest).firstOrNull { it.message.id == messageId }?.message?.content
 
-    private fun flattenForest(forest: List<MessageNode>): List<MessageNode> {
+    /** Рекурсивно разворачивает forest в плоский список — pre-order. */
+    private fun flatten(forest: List<MessageNode>): List<MessageNode> {
         val out = mutableListOf<MessageNode>()
         fun walk(node: MessageNode) {
             out += node

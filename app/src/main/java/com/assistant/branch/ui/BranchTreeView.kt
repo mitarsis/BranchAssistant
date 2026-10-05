@@ -39,7 +39,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -70,7 +69,6 @@ fun BranchTreeView(
                 activeSet = activeSet,
                 leafId = leafId,
                 siblings = emptyList(), // у корней беседы сиблингов нет
-                depth = 0,
                 onRegenerate = onRegenerate,
                 onSwitchBranch = onSwitchBranch,
                 onSpeakMessage = onSpeakMessage,
@@ -85,7 +83,6 @@ private fun RenderBranch(
     activeSet: Set<String>,
     leafId: String?,
     siblings: List<MessageNode>,
-    depth: Int,
     onRegenerate: (String) -> Unit,
     onSwitchBranch: (String) -> Unit,
     onSpeakMessage: (String) -> Unit,
@@ -126,7 +123,6 @@ private fun RenderBranch(
                 activeSet = activeSet,
                 leafId = leafId,
                 siblings = nextSiblingsFull,
-                depth = depth + 1,
                 onRegenerate = onRegenerate,
                 onSwitchBranch = onSwitchBranch,
                 onSpeakMessage = onSpeakMessage,
@@ -249,17 +245,8 @@ private fun MessageBubble(
 ) {
     val isUser = message.role == Message.ROLE_USER
     val baseColor = if (isUser) UserBubble else AssistantBubble
-    val accent = if (isUser) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primaryContainer
-    val brush = Brush.linearGradient(
-        colors = if (isUser)
-            listOf(baseColor, baseColor.copy(alpha = 0.85f))
-        else
-            listOf(baseColor, baseColor),
-        start = Offset(0f, 0f),
-        end = Offset(0f, Float.POSITIVE_INFINITY),
-    )
     Surface(
-        color = Color.Transparent,
+        color = baseColor,
         shape = RoundedCornerShape(
             topStart = 16.dp,
             topEnd = 16.dp,
@@ -271,14 +258,14 @@ private fun MessageBubble(
         modifier = Modifier.fillMaxWidth(),
     ) {
         Row(
-            modifier = Modifier
-                .background(brush)
-                .height(IntrinsicSize.Min),
+            modifier = Modifier.height(IntrinsicSize.Min),
         ) {
             if (isLeaf) {
+                // Толстая яркая полоска слева у leaf'а — чётко видно «текущий
+                // выбранный ответ». Тонкая 3dp сливалась с border'ом.
                 Box(
                     modifier = Modifier
-                        .width(3.dp)
+                        .width(5.dp)
                         .fillMaxHeight()
                         .background(MaterialTheme.colorScheme.primary),
                 )
