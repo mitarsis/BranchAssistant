@@ -12,7 +12,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -24,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -280,19 +283,41 @@ private fun NodeCard(
                 .align(Alignment.TopStart)
                 .padding(start = 14.dp, top = 8.dp),
         )
-        // Body. fillMaxWidth + явная высота, чтобы Text рендерился
-        // в фиксированной области внутри ноды. Лишнее обрежется
-        // через clip Box.
-        Text(
-            text = node.fullText.ifBlank { node.preview }.ifBlank { "…" },
-            color = Color(0xFFE6E8EE),
-            fontSize = 14.sp,
+        // Скроллируемый body: текст не обрезается, длинные сообщения можно
+        // прочитать свайпом внутри карточки. На resize handle это не влияет
+        // (он в BottomEnd, отдельный pointerInput).
+        val scrollState = rememberScrollState()
+        val textBg = if (node.isUser) Color(0xFF2C3242) else Color(0xFF1B1F29)
+        val isScrollable = scrollState.canScrollForward || scrollState.canScrollBackward
+        Box(
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .padding(start = 14.dp, end = 14.dp, top = 26.dp, bottom = 8.dp)
                 .fillMaxWidth()
-                .height(heightDp - 34.dp),
-        )
+                .height(heightDp - 34.dp)
+                .verticalScroll(scrollState),
+        ) {
+            Text(
+                text = node.fullText.ifBlank { node.preview }.ifBlank { "…" },
+                color = Color(0xFFE6E8EE),
+                fontSize = 14.sp,
+            )
+        }
+        // Fade-out снизу: подсказка, что текст прокручивается. Появляется
+        // только если есть что скроллить.
+        if (isScrollable) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .height(20.dp)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(Color.Transparent, textBg),
+                        )
+                    ),
+            )
+        }
         // Resize handle (правый нижний угол). Тянем — меняем размер ноды.
         Box(
             modifier = Modifier
