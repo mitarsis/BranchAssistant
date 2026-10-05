@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="new_conversation"
+        android:shortcutShortLabel="@string/shortcut_new_conversation"
+        android:shortcutLongLabel="@string/shortcut_new_conversation"
+        android:icon="@drawable/ic_launcher_foreground">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.assistant.branch"
+            android:targetClass="com.assistant.branch.MainActivity" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="continue"
+        android:shortcutShortLabel="@string/shortcut_continue"
+        android:shortcutLongLabel="@string/shortcut_continue"
+        android:icon="@drawable/ic_launcher_foreground">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.assistant.branch"
+            android:targetClass="com.assistant.branch.MainActivity" />
+    </shortcut>
+</shortcuts>

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Branch Assistant</string>
+    <string name="voice_label">Branch AI</string>
+    <string name="voice_settings_description">Разговорный ИИ-ассистент с ветвящимися беседами.</string>
+    <string name="shortcut_new_conversation">Новая беседа</string>
+    <string name="shortcut_continue">Продолжить</string>
+</resources>

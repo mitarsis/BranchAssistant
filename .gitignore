@@ -1,0 +1,47 @@
+*.iml
+.gradle
+/local.properties
+.idea/
+.DS_Store
+build/
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+local.properties
+.kotlin/
+# Generated
+*.iml
+.gradle/
+local.properties
+.idea/
+build/
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+.kotlin/
+
+# Logs / crash dumps
+hs_err_pid*.log
+replay_pid*.log
+app/hs_err_pid*.log
+
+# Keystores (РќР• РґРѕР»Р¶РЅС‹ РїРѕРїР°СЃС‚СЊ РІ РїСѓР±Р»РёС‡РЅС‹Р№ СЂРµРїРѕ!)
+*.jks
+*.keystore
+release.keystore
+
+# Local secrets
+.env
+.env.local
+
+# Editor
+.vscode/
+.idea/
+*.swp
+# Сторонние референсы (локальная разведка)
+reference/
+
