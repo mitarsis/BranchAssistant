@@ -246,15 +246,17 @@ class ChatViewModel(
     private var currentJob: Job? = null
 
     fun regenerate(messageId: String) {
-        val cid = _state.value.conversationId ?: return
+        if (_state.value.conversationId == null) return
         // Если у сообщения есть потомки, regenerate их cascade'нёт. Спрашиваем
         // подтверждения, чтобы юзер не терял контекст случайно.
-        val descendants = repository.descendantCount(messageId)
-        if (descendants > 0) {
-            _state.update { it.copy(pendingRegenerateId = messageId) }
-            return
+        viewModelScope.launch {
+            val descendants = repository.descendantCount(messageId)
+            if (descendants > 0) {
+                _state.update { it.copy(pendingRegenerateId = messageId) }
+                return@launch
+            }
+            runRegenerate(messageId)
         }
-        runRegenerate(messageId)
     }
 
     /** Юзер подтвердил regenerate в диалоге — выполняем. */
