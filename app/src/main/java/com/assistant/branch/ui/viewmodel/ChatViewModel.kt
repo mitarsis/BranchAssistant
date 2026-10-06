@@ -299,11 +299,6 @@ class ChatViewModel(
         _state.update { it.copy(editingMessageId = null, editingDraft = "") }
     }
 
-    /** Какое сообщение сейчас редактируется (id) + черновик. */
-    val editingId: StateFlow<String?> get() = _state.map { it.editingMessageId }.stateIn(
-        viewModelScope, SharingStarted.Eagerly, null
-    )
-
     /** Делегат для UI — посчитать descendants, чтобы показать в диалоге. */
     suspend fun descendantCountFor(messageId: String): Int {
         val cid = _state.value.conversationId ?: return 0

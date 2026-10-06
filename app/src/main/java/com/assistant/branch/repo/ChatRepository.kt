@@ -457,7 +457,7 @@ class ChatRepository(
      */
     suspend fun descendantCount(rootId: String): Int {
         val count = intArrayOf(0)
-        fun walk(id: String) {
+        suspend fun walk(id: String) {
             count[0]++
             messageDao.childrenOf(id).forEach { walk(it.id) }
         }
