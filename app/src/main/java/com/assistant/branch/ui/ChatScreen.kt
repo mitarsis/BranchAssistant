@@ -283,6 +283,10 @@ fun ChatScreen(
                                         isUser = n.message.role == com.assistant.branch.data.db.Message.ROLE_USER,
                                         isActive = n.message.id == state.activePath.lastOrNull(),
                                         isOnActivePath = n.message.id in state.activePath.toSet(),
+                                        source = when {
+                                            n.message.isAgentSuggestion -> "agent-suggestion"
+                                            else -> n.message.origin,
+                                        },
                                     )
                                 }
                             }
@@ -663,7 +667,7 @@ private fun InputBar(
                 modifier = Modifier.size(48.dp),
             ) {
                 Icon(
-                    Icons.Outlined.AccountTree,
+                    Icons.Outlined.AutoAwesome,
                     contentDescription = "Research",
                     tint = MaterialTheme.colorScheme.primary,
                 )
@@ -728,7 +732,7 @@ private fun ResearchProgressBar(
                 Spacer(Modifier.width(10.dp))
             } else {
                 Icon(
-                    Icons.Outlined.AccountTree,
+                    Icons.Outlined.AutoAwesome,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(18.dp),

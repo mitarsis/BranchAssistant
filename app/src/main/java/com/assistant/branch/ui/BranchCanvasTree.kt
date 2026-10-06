@@ -283,24 +283,33 @@ private fun NodeCard(
     val offsetXPx = posX.toInt()
     val offsetYPx = posY.toInt()
 
-    Box(
-        modifier = modifier
-            .size(width = widthDp, height = heightDp)
-            .offset { IntOffset(offsetXPx, offsetYPx) }
-            .clip(RoundedCornerShape(12.dp))
-            .background(if (node.isUser) Color(0xFF2C3242) else Color(0xFF1B1F29))
-            .border(
-                width = if (isLeaf) 2.5.dp else if (isForkParent) 2.5.dp else if (isActive) 2.dp else 1.dp,
-                color = when {
-                    isLeaf -> Color(0xFFB6A8FF)
-                    // forkParent — оранжевый: чёткий визуальный сигнал «от
-                    // этой ноды сейчас создаётся новая ветка».
-                    isForkParent -> Color(0xFFFFB74D)
-                    isActive -> Color(0xFF7C5CFF)
-                    else -> Color(0xFF323744)
-                },
-                shape = RoundedCornerShape(12.dp),
-            )
+    val isSuggestion = node.source == "agent-suggestion"
+Box(
+    modifier = modifier
+        .size(width = widthDp, height = heightDp)
+        .offset { IntOffset(offsetXPx, offsetYPx) }
+        .clip(RoundedCornerShape(12.dp))
+        .background(
+            when {
+                isSuggestion -> Color(0xFF1B1F29).copy(alpha = 0.7f)
+                node.isUser -> Color(0xFF2C3242)
+                else -> Color(0xFF1B1F29)
+            }
+        )
+        .border(
+            width = if (isLeaf) 2.5.dp else if (isForkParent) 2.5.dp else if (isActive) 2.dp else 1.dp,
+            color = when {
+                isLeaf -> Color(0xFFB6A8FF)
+                // forkParent — оранжевый: чёткий визуальный сигнал «от
+                // этой ноды сейчас создаётся новая ветка».
+                isForkParent -> Color(0xFFFFB74D)
+                // suggestion от агента — пунктирная обводка.
+                isSuggestion -> Color(0xFF9E9E9E)
+                isActive -> Color(0xFF7C5CFF)
+                else -> Color(0xFF323744)
+            },
+            shape = RoundedCornerShape(12.dp),
+        )
             .pointerInput(Unit) {
                 detectDragGestures { change, drag ->
                     val dx = drag.x.roundToInt().toFloat()
@@ -318,15 +327,20 @@ private fun NodeCard(
                 )
             },
     ) {
-        // Header.
-        Text(
-            text = if (node.isUser) "ВЫ" else "AI",
-            color = Color(0xFF9AA1B1),
-            fontSize = 11.sp,
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(start = 14.dp, top = 8.dp),
-        )
+// Header. Эмодзи вместо текстовых меток — быстрее считывается на глаз.
+    Text(
+        text = when {
+            node.source == "agent-suggestion" -> "✨ suggestion"
+            node.source == "agent" -> "✨ agent"
+            node.isUser -> "👤"
+            else -> "🤖"
+        },
+        color = Color(0xFF9AA1B1),
+        fontSize = 11.sp,
+        modifier = Modifier
+            .align(Alignment.TopStart)
+            .padding(start = 14.dp, top = 8.dp),
+    )
         // Скроллируемый body: текст не обрезается, длинные сообщения можно
         // прочитать свайпом внутри карточки. На resize handle это не влияет
         // (он в BottomEnd, отдельный pointerInput).
@@ -427,7 +441,12 @@ private fun ExpandedNodeOverlay(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(
-                        text = if (node.isUser) "ВЫ" else "AI",
+                        text = when {
+                            node.source == "agent-suggestion" -> "✨ suggestion"
+                            node.source == "agent" -> "✨ agent"
+                            node.isUser -> "👤"
+                            else -> "🤖"
+                        },
                         color = Color(0xFF9AA1B1),
                         fontSize = 12.sp,
                     )

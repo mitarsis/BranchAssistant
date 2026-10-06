@@ -22,7 +22,19 @@ import java.util.UUID
 data class MessageNode(
     val message: Message,
     val children: List<MessageNode>,
-)
+) {
+    /** Юзер/AI/агент-исследователь — для UI-метки. Денормализовано из
+     * `message.role` и `message.origin` для скорости (не лазим в БД в каждом
+     * recomposition). */
+    val author: MessageAuthor = when {
+        message.isAgentSuggestion -> MessageAuthor.AGENT_SUGGESTION
+        message.origin == "agent" -> MessageAuthor.AGENT
+        message.role == Message.ROLE_USER -> MessageAuthor.USER
+        else -> MessageAuthor.AI
+    }
+}
+
+enum class MessageAuthor { USER, AI, AGENT, AGENT_SUGGESTION }
 
 /** Ошибка сжатия беседы. ChatVM ловит и показывает в state.error. */
 class CompressException(message: String) : RuntimeException(message)

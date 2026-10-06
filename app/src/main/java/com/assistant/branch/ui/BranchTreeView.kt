@@ -193,7 +193,7 @@ private fun MessageRow(
         verticalAlignment = Alignment.Top,
     ) {
         if (!isUser) {
-            Avatar(isUser = false, isActive = isLeaf, isStreaming = message.isStreaming)
+            Avatar(author = node.author, isActive = isLeaf, isStreaming = message.isStreaming)
             Spacer(Modifier.width(8.dp))
         }
         // Сам пузырь — без fillMaxWidth(0.85f) на Column, чтобы Row правильно размерил дочерние элементы.
@@ -241,17 +241,27 @@ private fun MessageRow(
         }
         if (isUser) {
             Spacer(Modifier.width(8.dp))
-            Avatar(isUser = true, isActive = isLeaf, isStreaming = false)
+            Avatar(author = node.author, isActive = isLeaf, isStreaming = false)
         }
     }
 }
 
 @Composable
 private fun Avatar(
-    isUser: Boolean,
+    author: MessageAuthor,
     isActive: Boolean,
     isStreaming: Boolean,
 ) {
+    val (emoji, bg, fg, borderAlpha) = when (author) {
+        MessageAuthor.USER -> Quadruple("👤", MaterialTheme.colorScheme.primaryContainer,
+            MaterialTheme.colorScheme.onPrimary, 0f)
+        MessageAuthor.AI -> Quadruple("🤖", MaterialTheme.colorScheme.surfaceVariant,
+            TextHi, 0f)
+        MessageAuthor.AGENT -> Quadruple("✨", MaterialTheme.colorScheme.tertiaryContainer,
+            MaterialTheme.colorScheme.onTertiaryContainer, 0.4f)
+        MessageAuthor.AGENT_SUGGESTION -> Quadruple("❓", MaterialTheme.colorScheme.surfaceVariant,
+            TextLo, 0.6f)   // пунктирная обводка, более прозрачный
+    }
     val infinite = rememberInfiniteTransition(label = "avatar")
     val pulse by infinite.animateFloat(
         initialValue = 0f,
@@ -276,24 +286,30 @@ private fun Avatar(
                     .background(ringColor),
             )
         }
+        // Пунктирная обводка для suggestions, чтобы визуально отделить от живых нод.
+        val borderModifier = if (author == MessageAuthor.AGENT_SUGGESTION) {
+            Modifier.border(
+                width = 1.dp,
+                color = TextLo.copy(alpha = 0.5f),
+                shape = CircleShape,
+            )
+        } else Modifier
         Surface(
-            color = if (isUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+            color = bg,
             shape = CircleShape,
-            modifier = Modifier.size(34.dp),
+            modifier = Modifier.size(34.dp).then(borderModifier),
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Text(
-                    text = if (isUser) "Я" else "AI",
-                    color = if (isUser) MaterialTheme.colorScheme.onPrimary else TextHi,
-                    style = MaterialTheme.typography.labelLarge.copy(
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                    ),
+                    text = emoji,
+                    fontSize = 18.sp,
                 )
             }
         }
     }
 }
+
+private data class Quadruple<A, B, C, D>(val a: A, val b: B, val c: C, val d: D)
 
 @Composable
 private fun MessageBubble(
@@ -302,8 +318,23 @@ private fun MessageBubble(
 ) {
     val isUser = message.role == Message.ROLE_USER
     val baseColor = if (isUser) UserBubble else AssistantBubble
+    // Для suggestion от агента — полупрозрачный фон и dashed-border чтобы
+    // визуально отличать от «живых» сообщений. Юзер сразу видит: «это
+    // предложение, не моё».
+    val suggestionModifier = if (message.isAgentSuggestion) {
+        Modifier.border(
+            width = 1.dp,
+            color = androidx.compose.ui.graphics.Color.Gray.copy(alpha = 0.4f),
+            shape = RoundedCornerShape(
+                topStart = 16.dp,
+                topEnd = 16.dp,
+                bottomStart = if (isUser) 16.dp else 4.dp,
+                bottomEnd = if (isUser) 4.dp else 16.dp,
+            ),
+        )
+    } else Modifier
     Surface(
-        color = baseColor,
+        color = if (message.isAgentSuggestion) baseColor.copy(alpha = 0.6f) else baseColor,
         shape = RoundedCornerShape(
             topStart = 16.dp,
             topEnd = 16.dp,
@@ -312,7 +343,7 @@ private fun MessageBubble(
         ),
         tonalElevation = 1.dp,
         shadowElevation = 1.dp,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().then(suggestionModifier),
     ) {
         Row(
             modifier = Modifier.height(IntrinsicSize.Min),
