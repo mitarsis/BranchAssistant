@@ -58,6 +58,7 @@ fun BranchCanvasTree(
     modifier: Modifier = Modifier,
     onSelect: (String) -> Unit = {},
     onLongPress: (BranchNodeInfo) -> Unit = {},
+    forkParentId: String? = null,
 ) {
     if (nodes.isEmpty()) return
 
@@ -226,6 +227,7 @@ fun BranchCanvasTree(
                 heightPx = p.h,
                 isActive = isActive,
                 isLeaf = isLeaf,
+                isForkParent = n.id == forkParentId,
                 onDragDelta = { dx, dy ->
                     val cur = positions[n.id] ?: return@NodeCard
                     positions[n.id] = cur.copy(x = cur.x + dx, y = cur.y + dy)
@@ -267,6 +269,7 @@ private fun NodeCard(
     heightPx: Float,
     isActive: Boolean,
     isLeaf: Boolean,
+    isForkParent: Boolean = false,
     onDragDelta: (Float, Float) -> Unit,
     onResize: (Float, Float) -> Unit,
     onClick: () -> Unit,
@@ -287,9 +290,12 @@ private fun NodeCard(
             .clip(RoundedCornerShape(12.dp))
             .background(if (node.isUser) Color(0xFF2C3242) else Color(0xFF1B1F29))
             .border(
-                width = if (isLeaf) 2.5.dp else if (isActive) 2.dp else 1.dp,
+                width = if (isLeaf) 2.5.dp else if (isForkParent) 2.5.dp else if (isActive) 2.dp else 1.dp,
                 color = when {
                     isLeaf -> Color(0xFFB6A8FF)
+                    // forkParent — оранжевый: чёткий визуальный сигнал «от
+                    // этой ноды сейчас создаётся новая ветка».
+                    isForkParent -> Color(0xFFFFB74D)
                     isActive -> Color(0xFF7C5CFF)
                     else -> Color(0xFF323744)
                 },

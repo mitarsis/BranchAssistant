@@ -36,6 +36,12 @@ data class ChatUiState(
     val speaking: Boolean = false,
     // Когда не null — следующее сообщение будет ответвлением от этого id.
     val branchParentId: String? = null,
+    // Когда не null — regenerate ждёт подтверждения в диалоге (cascade > 0).
+    val pendingRegenerateId: String? = null,
+    // Когда не null — это сообщение сейчас в режиме inline-редактирования.
+    val editingMessageId: String? = null,
+    // Черновик редактируемого сообщения.
+    val editingDraft: String = "",
 )
 
 class ChatViewModel(
@@ -240,6 +246,71 @@ class ChatViewModel(
     private var currentJob: Job? = null
 
     fun regenerate(messageId: String) {
+        val cid = _state.value.conversationId ?: return
+        // Если у сообщения есть потомки, regenerate их cascade'нёт. Спрашиваем
+        // подтверждения, чтобы юзер не терял контекст случайно.
+        val descendants = repository.descendantCount(cid, messageId)
+        if (descendants > 0) {
+            _state.update { it.copy(pendingRegenerateId = messageId) }
+            return
+        }
+        runRegenerate(messageId)
+    }
+
+    /** Юзер подтвердил regenerate в диалоге — выполняем. */
+    fun confirmRegenerate() {
+        val id = _state.value.pendingRegenerateId ?: return
+        _state.update { it.copy(pendingRegenerateId = null) }
+        runRegenerate(id)
+    }
+
+    /** Юзер отменил regenerate в диалоге. */
+    fun cancelRegenerate() {
+        _state.update { it.copy(pendingRegenerateId = null) }
+    }
+
+    /** Редактировать текст сообщения (вызывается из inline-редактора). */
+    fun editMessage(messageId: String, newContent: String) {
+        viewModelScope.launch {
+            repository.editMessage(messageId, newContent)
+            _state.update { it.copy(editingMessageId = null, editingDraft = "") }
+        }
+    }
+
+    fun startEditing(messageId: String, currentContent: String) {
+        _state.update { it.copy(editingMessageId = messageId, editingDraft = currentContent) }
+    }
+
+    /**
+     * Найти контент message по id в текущем branchForest. Нужно при старте
+     * редактирования: инициализируем черновик текущим текстом message.
+     */
+    fun messageForEdit(messageId: String): String? {
+        val forest = _state.value.branchForest
+        val all = flatten(forest)
+        return all.firstOrNull { it.message.id == messageId }?.message?.content
+    }
+
+    fun updateEditingDraft(text: String) {
+        _state.update { it.copy(editingDraft = text) }
+    }
+
+    fun cancelEditing() {
+        _state.update { it.copy(editingMessageId = null, editingDraft = "") }
+    }
+
+    /** Какое сообщение сейчас редактируется (id) + черновик. */
+    val editingId: StateFlow<String?> get() = _state.map { it.editingMessageId }.stateIn(
+        viewModelScope, SharingStarted.Eagerly, null
+    )
+
+    /** Делегат для UI — посчитать descendants, чтобы показать в диалоге. */
+    suspend fun descendantCountFor(messageId: String): Int {
+        val cid = _state.value.conversationId ?: return 0
+        return repository.descendantCount(cid, messageId)
+    }
+
+    private fun runRegenerate(messageId: String) {
         val cid = _state.value.conversationId ?: return
         currentJob?.cancel()
         currentJob = viewModelScope.launch {

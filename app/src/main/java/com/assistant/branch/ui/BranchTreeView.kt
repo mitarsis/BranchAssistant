@@ -26,13 +26,18 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
+import androidx.compose.material.icons.outlined.AccountTree
+import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.VolumeUp
+import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -57,6 +62,13 @@ fun BranchTreeView(
     activePath: List<String>,
     onRegenerate: (String) -> Unit,
     onSwitchBranch: (String) -> Unit,
+    onFork: (String) -> Unit = {},
+    onEdit: (String) -> Unit = {},
+    onSaveEdit: (String, String) -> Unit = { _, _ -> },
+    onCancelEdit: () -> Unit = {},
+    editingId: String? = null,
+    editingDraft: String = "",
+    onEditingDraftChange: (String) -> Unit = {},
     onSpeakMessage: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -71,6 +83,13 @@ fun BranchTreeView(
                 siblings = emptyList(), // у корней беседы сиблингов нет
                 onRegenerate = onRegenerate,
                 onSwitchBranch = onSwitchBranch,
+                onFork = onFork,
+                onEdit = onEdit,
+                onSaveEdit = onSaveEdit,
+                onCancelEdit = onCancelEdit,
+                editingId = editingId,
+                editingDraft = editingDraft,
+                onEditingDraftChange = onEditingDraftChange,
                 onSpeakMessage = onSpeakMessage,
             )
         }
@@ -85,6 +104,13 @@ private fun RenderBranch(
     siblings: List<MessageNode>,
     onRegenerate: (String) -> Unit,
     onSwitchBranch: (String) -> Unit,
+    onFork: (String) -> Unit,
+    onEdit: (String) -> Unit,
+    onSaveEdit: (String, String) -> Unit,
+    onCancelEdit: () -> Unit,
+    editingId: String?,
+    editingDraft: String,
+    onEditingDraftChange: (String) -> Unit,
     onSpeakMessage: (String) -> Unit,
 ) {
     val active = node.message.id in activeSet
@@ -100,6 +126,13 @@ private fun RenderBranch(
                 message = node.message,
                 isLeaf = isLeaf,
                 onRegenerate = { onRegenerate(node.message.id) },
+                onFork = { onFork(node.message.id) },
+                onEdit = { onEdit(node.message.id) },
+                onSaveEdit = { newContent -> onSaveEdit(node.message.id, newContent) },
+                onCancelEdit = onCancelEdit,
+                isEditing = editingId == node.message.id,
+                editingDraft = editingDraft,
+                onEditingDraftChange = onEditingDraftChange,
                 onSpeakMessage = { onSpeakMessage(node.message.id) },
             )
             // Переключатель альтернативных ответов ассистента (если есть).
@@ -111,6 +144,7 @@ private fun RenderBranch(
                     current = node,
                     siblings = siblings,
                     onSelect = onSwitchBranch,
+                    onAdd = onFork,
                 )
             }
         }
@@ -125,6 +159,13 @@ private fun RenderBranch(
                 siblings = nextSiblingsFull,
                 onRegenerate = onRegenerate,
                 onSwitchBranch = onSwitchBranch,
+                onFork = onFork,
+                onEdit = onEdit,
+                onSaveEdit = onSaveEdit,
+                onCancelEdit = onCancelEdit,
+                editingId = editingId,
+                editingDraft = editingDraft,
+                onEditingDraftChange = onEditingDraftChange,
                 onSpeakMessage = onSpeakMessage,
             )
         }
@@ -136,6 +177,13 @@ private fun MessageRow(
     message: Message,
     isLeaf: Boolean,
     onRegenerate: () -> Unit,
+    onFork: () -> Unit,
+    onEdit: () -> Unit,
+    onSaveEdit: (String) -> Unit = {},
+    onCancelEdit: () -> Unit = {},
+    isEditing: Boolean = false,
+    editingDraft: String = "",
+    onEditingDraftChange: (String) -> Unit = {},
     onSpeakMessage: () -> Unit,
 ) {
     val isUser = message.role == Message.ROLE_USER
@@ -155,7 +203,16 @@ private fun MessageRow(
                 .weight(1f, fill = false)
                 .widthIn(max = 480.dp),
         ) {
-            MessageBubble(message = message, isLeaf = isLeaf)
+            if (isEditing) {
+                InlineEditor(
+                    draft = editingDraft,
+                    onDraftChange = onEditingDraftChange,
+                    onSave = onSaveEdit,
+                    onCancel = onCancelEdit,
+                )
+            } else {
+                MessageBubble(message = message, isLeaf = isLeaf)
+            }
             if (!isUser && !message.isStreaming && message.content.isNotBlank()) {
                 Spacer(Modifier.height(4.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -177,7 +234,7 @@ private fun MessageRow(
                     )
                     if (isLeaf) {
                         Spacer(Modifier.width(8.dp))
-                        MetaRow(onRegenerate = onRegenerate)
+                        MetaRow(onRegenerate = onRegenerate, onFork = onFork)
                     }
                 }
             }
@@ -315,7 +372,7 @@ private fun StreamingDots() {
 }
 
 @Composable
-private fun MetaRow(onRegenerate: () -> Unit) {
+private fun MetaRow(onRegenerate: () -> Unit, onFork: () -> Unit) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(2.dp),
@@ -324,6 +381,14 @@ private fun MetaRow(onRegenerate: () -> Unit) {
             Icon(
                 Icons.Outlined.Refresh,
                 contentDescription = "Перегенерировать",
+                tint = TextLo,
+                modifier = Modifier.size(15.dp),
+            )
+        }
+        IconButton(onClick = onFork, modifier = Modifier.size(28.dp)) {
+            Icon(
+                Icons.Outlined.AccountTree,
+                contentDescription = "Ответвление",
                 tint = TextLo,
                 modifier = Modifier.size(15.dp),
             )
@@ -341,6 +406,7 @@ private fun SiblingSwitcher(
     current: MessageNode,
     siblings: List<MessageNode>,
     onSelect: (String) -> Unit,
+    onAdd: (String) -> Unit = {},
 ) {
     // Защита: если current не в списке (например, render краевого случая) — прячем.
     if (siblings.size < 2) return
@@ -385,6 +451,64 @@ private fun SiblingSwitcher(
                 tint = TextLo,
                 modifier = Modifier.size(14.dp),
             )
+        }
+        IconButton(
+            onClick = { onAdd(current.message.id) },
+            modifier = Modifier.size(28.dp),
+        ) {
+            Icon(
+                Icons.Outlined.Add,
+                contentDescription = "Новая альтернатива",
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(14.dp),
+            )
+        }
+    }
+}
+
+/**
+ * Inline-редактор для user-message. TextField с кнопками «Сохранить» / «Отмена».
+ * Появляется вместо MessageBubble когда [isEditing] == true.
+ */
+@Composable
+private fun InlineEditor(
+    draft: String,
+    onDraftChange: (String) -> Unit,
+    onSave: (String) -> Unit,
+    onCancel: () -> Unit,
+) {
+    val baseColor = UserBubble
+    Surface(
+        color = baseColor,
+        shape = RoundedCornerShape(
+            topStart = 16.dp,
+            topEnd = 16.dp,
+            bottomStart = 16.dp,
+            bottomEnd = 4.dp,
+        ),
+        tonalElevation = 1.dp,
+        shadowElevation = 1.dp,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+            OutlinedTextField(
+                value = draft,
+                onValueChange = onDraftChange,
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 2,
+                maxLines = 8,
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(
+                horizontalArrangement = Arrangement.End,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                TextButton(onClick = onCancel) { Text("Отмена") }
+                Spacer(Modifier.width(4.dp))
+                Button(onClick = { onSave(draft) }, enabled = draft.isNotBlank()) {
+                    Text("Сохранить")
+                }
+            }
         }
     }
 }

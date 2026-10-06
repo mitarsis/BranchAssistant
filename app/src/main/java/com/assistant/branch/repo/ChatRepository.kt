@@ -450,6 +450,36 @@ class ChatRepository(
         }.take(50)
     }
 
+    /**
+     * Считает сколько сообщений находится ниже [rootId] в дереве (включая
+     * все уровни вложенности). Используется для warning перед cascade-DELETE
+     * при regenerate.
+     */
+    suspend fun descendantCount(rootId: String): Int {
+        val count = intArrayOf(0)
+        fun walk(id: String) {
+            count[0]++
+            messageDao.childrenOf(id).forEach { walk(it.id) }
+        }
+        walk(rootId)
+        return count[0] - 1   // не считаем сам rootId
+    }
+
+    /**
+     * Редактирует текст сообщения (в БД). Не перегенерирует потомков — это на
+     * усмотрение юзера (он может нажать «regenerate» отдельно, если хочет
+     * чтобы AI ответил заново с учётом правки).
+     */
+    suspend fun editMessage(messageId: String, newContent: String) {
+        val trimmed = normaliseText(newContent)
+        if (trimmed.isBlank()) return
+        messageDao.updateContent(messageId, trimmed, false)
+        // updatedAt родительской беседы — чтобы она поднялась в History.
+        messageDao.byId(messageId)?.conversationId?.let { cid ->
+            conversationDao.touch(cid, System.currentTimeMillis())
+        }
+    }
+
     private suspend fun deleteSubtree(rootId: String) {
         val toDelete = ArrayDeque<String>()
         toDelete.add(rootId)

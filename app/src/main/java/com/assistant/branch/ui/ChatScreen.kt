@@ -42,6 +42,7 @@ import androidx.compose.material.icons.outlined.Summarize
 import androidx.compose.material.icons.outlined.VolumeUp
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -51,6 +52,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -252,6 +254,16 @@ fun ChatScreen(
                                 activePath = state.activePath,
                                 onRegenerate = { id -> vm.regenerate(id) },
                                 onSwitchBranch = { id -> vm.switchBranch(id) },
+                                onFork = { id -> vm.startBranch(id) },
+                                onEdit = { id ->
+                                    val msg = vm.messageForEdit(id)
+                                    if (msg != null) vm.startEditing(id, msg)
+                                },
+                                onSaveEdit = { id, newContent -> vm.editMessage(id, newContent) },
+                                onCancelEdit = { vm.cancelEditing() },
+                                editingId = state.editingMessageId,
+                                editingDraft = state.editingDraft,
+                                onEditingDraftChange = vm::updateEditingDraft,
                                 onSpeakMessage = { id -> vm.speakMessage(id) },
                             )
                         }
@@ -292,6 +304,7 @@ fun ChatScreen(
                                         vm.switchBranch(node.id)
                                     }
                                 },
+                                forkParentId = state.branchParentId,
                             )
                         }
                         if (state.branchForest.isEmpty()) {
@@ -324,6 +337,35 @@ fun ChatScreen(
                 )
             }
         }
+    }
+
+    // Диалог подтверждения regenerate, когда cascade > 0.
+    if (state.pendingRegenerateId != null) {
+        val pendingId = state.pendingRegenerateId!!
+        // Считаем descendants заранее (suspend) — покажем в диалоге сколько
+        // сообщений будет удалено.
+        var descendants by remember(pendingId) { mutableStateOf(-1) }
+        LaunchedEffect(pendingId) {
+            descendants = vm.descendantCountFor(pendingId)
+        }
+        AlertDialog(
+            onDismissRequest = { vm.cancelRegenerate() },
+            title = { Text("Перегенерировать ответ?") },
+            text = {
+                Text(
+                    if (descendants > 0)
+                        "Будет удалено $descendants сообщени${if (descendants % 10 == 1 && descendants % 100 != 11) "е" else if (descendants % 10 in 2..4) "я" else "й"} после этого, и создан новый ответ."
+                    else
+                        "Создать новый вариант ответа?"
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { vm.confirmRegenerate() }) { Text("Перегенерировать") }
+            },
+            dismissButton = {
+                TextButton(onClick = { vm.cancelRegenerate() }) { Text("Отмена") }
+            },
+        )
     }
 }
 
