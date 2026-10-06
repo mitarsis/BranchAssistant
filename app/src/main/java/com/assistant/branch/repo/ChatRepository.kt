@@ -7,12 +7,15 @@ import com.assistant.branch.network.ApiMessage
 import com.assistant.branch.network.ChatRequest
 import com.assistant.branch.network.ApiClient
 import com.assistant.branch.network.StreamEvent
+import com.assistant.branch.repo.JevRouter
 import com.assistant.branch.settings.AssistantSettings
 import com.assistant.branch.settings.ModelEntry
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import java.util.UUID
 
@@ -546,6 +549,271 @@ class ChatRepository(
         val hasChildren = all.map { it.id }.toHashSet()
         return all.filter { it.id !in hasChildren || all.none { m -> m.parentId == it.id } }
             .maxByOrNull { it.createdAt }
+    }
+
+    /**
+     * Минимальная длина seed'а, при которой имеет смысл запускать research.
+     * Если seed короче — вернём null из [startResearch], а VM покажет ошибку
+     * с предложением расширить.
+     */
+    val minSeedLength = 4
+
+    /**
+     * Запускает research: агент-исследователь раскрывает [seedTopic] от seed-сообщения.
+     *
+     * Алгоритм:
+     *   1. Phase 1 (outline): один LLM-вызов, который возвращает [breadth]
+     *      разных углов рассмотрения темы.
+     *   2. Phase 2 (per-branch): для каждого угла — один LLM-вызов
+     *      на развёрнутый ответ. Создаём user-suggestion + assistant под seed'ом.
+     *   3. Phase 3 (synthesis): один LLM-вызов с кратким резюме.
+     *
+     * Если [depth] > 1 — для каждого assistant-ответа запускается рекурсия
+     * (Phase 2 повторяется с seed'ом = assistant id). В MVP depth ограничен 1.
+     *
+     * Юзер может прервать через collect.isActive — корутину кильнет cancellation.
+     * Все созданные сообщения остаются в БД (partial result).
+     */
+    fun startResearch(
+        conversationId: String,
+        seedMessageId: String,
+        seedTopic: String,
+        breadth: Int = 3,
+        depth: Int = 1,
+    ): Flow<ResearchEvent> = flow {
+        if (seedTopic.trim().length < minSeedLength) {
+            emit(ResearchEvent.Aborted(seedMessageId, "Слишком короткая тема для исследования — расширьте запрос"))
+            return@flow
+        }
+        if (breadth !in 1..5 || depth !in 0..2) {
+            emit(ResearchEvent.Aborted(seedMessageId, "Параметры research вне диапазона"))
+            return@flow
+        }
+
+        emit(ResearchEvent.Started(seedMessageId, seedTopic.trim(), breadth, depth))
+
+        // === Phase 1: outline ===
+        val outlineResult = runOutlineAgent(seedTopic, breadth)
+        val angles = outlineResult.getOrElse {
+            emit(ResearchEvent.Aborted(seedMessageId, "Не удалось сгенерировать outline: ${it.message}"))
+            return@flow
+        }
+        emit(ResearchEvent.OutlineProposed(seedMessageId, angles))
+
+        // === Phase 2: каждая ветка ===
+        for ((idx, angle) in angles.withIndex()) {
+            // Создаём user-suggestion (что юзер как будто задал вопрос по этому углу)
+            val now = System.currentTimeMillis() + idx   // чтобы createdAt монотонно рос
+            val suggestedQuestion = Message(
+                id = UUID.randomUUID().toString(),
+                conversationId = conversationId,
+                parentId = seedMessageId,
+                role = Message.ROLE_USER,
+                content = angle,
+                createdAt = now,
+                isAgentSuggestion = true,
+                origin = "agent",
+            )
+            messageDao.upsert(suggestedQuestion)
+            emit(ResearchEvent.MessageCreated(
+                seedMessageId, suggestedQuestion.id, suggestedQuestion.parentId, isSuggestion = true,
+            ))
+            emit(ResearchEvent.BranchStarted(seedMessageId, angle, suggestedQuestion.id))
+
+            // LLM-вызов для развёрнутого ответа по этому углу
+            val response = runBranchAgent(seedTopic, angle).getOrElse {
+                // Создать assistant даже если LLM упал — с маркером ошибки.
+                val failMsg = Message(
+                    id = UUID.randomUUID().toString(),
+                    conversationId = conversationId,
+                    parentId = suggestedQuestion.id,
+                    role = Message.ROLE_ASSISTANT,
+                    content = "⚠ Ошибка: ${it.message}",
+                    createdAt = now + 1,
+                    model = null,
+                    origin = "agent",
+                )
+                messageDao.upsert(failMsg)
+                emit(ResearchEvent.MessageCreated(seedMessageId, failMsg.id, failMsg.parentId, isSuggestion = false))
+                emit(ResearchEvent.BranchCompleted(seedMessageId, angle, failMsg.id))
+                continue
+            }
+            val answerMsg = Message(
+                id = UUID.randomUUID().toString(),
+                conversationId = conversationId,
+                parentId = suggestedQuestion.id,
+                role = Message.ROLE_ASSISTANT,
+                content = response,
+                createdAt = now + 1,
+                model = null,
+                origin = "agent",
+            )
+            messageDao.upsert(answerMsg)
+            emit(ResearchEvent.MessageCreated(seedMessageId, answerMsg.id, answerMsg.parentId, isSuggestion = false))
+            emit(ResearchEvent.BranchCompleted(seedMessageId, angle, answerMsg.id))
+
+            // === Phase 3 (опционально, depth > 1): углубляем каждый assistant ===
+            if (depth > 1) {
+                // Не реализовано в MVP. Юзер может сам регенерить / форкать.
+                // Для будущего: runBranchAgent по answerMsg.content как новый seed.
+            }
+        }
+
+        // === Phase 4: synthesis ===
+        val synthesis = runSynthesisAgent(seedTopic, angles).getOrElse {
+            // Не критично — research без synthesis всё равно полезен.
+            emit(ResearchEvent.Aborted(seedMessageId, "Synthesis не удался: ${it.message}"))
+            emit(ResearchEvent.Completed(seedMessageId))
+            return@flow
+        }
+        // Synthesis — это просто ещё один assistant-сообщение под seed'ом,
+        // с кратким summary. Создаём как обычное сообщение, помечаем origin=agent.
+        val summaryMsg = Message(
+            id = UUID.randomUUID().toString(),
+            conversationId = conversationId,
+            parentId = seedMessageId,
+            role = Message.ROLE_ASSISTANT,
+            content = synthesis,
+            createdAt = System.currentTimeMillis() + 1000,
+            model = null,
+            origin = "agent",
+        )
+        messageDao.upsert(summaryMsg)
+        emit(ResearchEvent.SynthesisReady(seedMessageId, summaryMsg.id, synthesis))
+
+        emit(ResearchEvent.Completed(seedMessageId))
+    }.flowOn(Dispatchers.IO)
+
+    /**
+     * Phase 1 — outline: один LLM-вызов, который возвращает список углов.
+     * Парсим ответ как нумерованный список (1. / 2. / 3. …). Если LLM
+     * вернул мусор — fallback: одна ветка "объясни подробнее".
+     */
+    private suspend fun runOutlineAgent(topic: String, breadth: Int): kotlin.Result<List<String>> {
+        val systemPrompt = "Ты — ассистент-исследователь. Дай ровно $breadth разных угла или аспекта для глубокого изучения темы. Каждый угол — это короткое название (3-7 слов), формулировка самостоятельного подвопроса или интеллектуальной позиции. Не повторяйся, не объясняй общие места — только конкретные подходы к теме. Формат ответа: нумерованный список, по одному углу на строку, только само название, без пояснений."
+        val userPrompt = "Тема: $topic"
+
+        val cfg = settings.snapshot()
+        if (cfg.apiKey.isBlank()) return kotlin.Result.failure(IllegalStateException("API ключ не задан"))
+        if (cfg.models.isEmpty()) return kotlin.Result.failure(IllegalStateException("Нет моделей"))
+
+        val request = ChatRequest(
+            model = resolveModelName(cfg.models),
+            messages = listOf(
+                ApiMessage("system", systemPrompt),
+                ApiMessage("user", userPrompt),
+            ),
+            temperature = 0.6f,
+            stream = false,
+        )
+
+        return runCatching {
+                val buf = StringBuilder()
+                client.streamChat(request, cfg.apiKey, cfg.baseUrl).collect { ev ->
+                    when (ev) {
+                        is StreamEvent.Token -> buf.append(ev.text)
+                        is StreamEvent.Failure -> throw ev.throwable
+                        else -> {}
+                    }
+                }
+                buf.toString().trim()
+            }
+            .mapCatching { raw ->
+                parseNumberedList(raw).take(breadth).ifEmpty {
+                    listOf("Объясни подробнее")
+                }
+            }
+    }
+
+    /**
+     * Phase 2 — развёрнутый ответ по одному углу. Один вызов.
+     */
+    private suspend fun runBranchAgent(topic: String, angle: String): kotlin.Result<String> {
+        val cfg = settings.snapshot()
+        if (cfg.apiKey.isBlank()) return kotlin.Result.failure(IllegalStateException("API ключ не задан"))
+        if (cfg.models.isEmpty()) return kotlin.Result.failure(IllegalStateException("Нет моделей"))
+
+        val systemPrompt = "Ты — ассистент-исследователь. Ответь на вопрос кратко и по делу, 3-5 абзацев. Только суть, без воды."
+        val userPrompt = "Тема: $topic\n\nРаскрой этот аспект: $angle"
+
+        val request = ChatRequest(
+            model = resolveModelName(cfg.models),
+            messages = listOf(
+                ApiMessage("system", systemPrompt),
+                ApiMessage("user", userPrompt),
+            ),
+            temperature = 0.5f,
+            stream = false,
+        )
+
+        return runCatching {
+            val buf = StringBuilder()
+            client.streamChat(request, cfg.apiKey, cfg.baseUrl).collect { ev ->
+                when (ev) {
+                    is StreamEvent.Token -> buf.append(ev.text)
+                    is StreamEvent.Failure -> throw ev.throwable
+                    else -> {}
+                }
+            }
+            buf.toString().trim().ifEmpty { throw IllegalStateException("Пустой ответ") }
+        }
+    }
+
+    /**
+     * Phase 3 — synthesis: один вызов, который делает краткое summary
+     * по всем раскрытым углам.
+     */
+    private suspend fun runSynthesisAgent(
+        topic: String,
+        angles: List<String>,
+    ): kotlin.Result<String> {
+        val cfg = settings.snapshot()
+        if (cfg.apiKey.isBlank()) return kotlin.Result.failure(IllegalStateException("API ключ не задан"))
+        if (cfg.models.isEmpty()) return kotlin.Result.failure(IllegalStateException("Нет моделей"))
+
+        val systemPrompt = "Ты — ассистент-исследователь. Сделай краткое summary (3-5 предложений) по исследованию темы с разных углов. Только суть, без воды."
+        val anglesText = angles.mapIndexed { i, a -> "${i + 1}. $a" }.joinToString("\n")
+        val userPrompt = "Тема: $topic\n\nРассмотренные углы:\n$anglesText\n\nСделай краткое summary по теме."
+
+        val request = ChatRequest(
+            model = resolveModelName(cfg.models),
+            messages = listOf(
+                ApiMessage("system", systemPrompt),
+                ApiMessage("user", userPrompt),
+            ),
+            temperature = 0.4f,
+            stream = false,
+        )
+
+        return runCatching {
+            val buf = StringBuilder()
+            client.streamChat(request, cfg.apiKey, cfg.baseUrl).collect { ev ->
+                when (ev) {
+                    is StreamEvent.Token -> buf.append(ev.text)
+                    is StreamEvent.Failure -> throw ev.throwable
+                    else -> {}
+                }
+            }
+            buf.toString().trim().ifEmpty { throw IllegalStateException("Пустой ответ") }
+        }
+    }
+
+    /**
+     * Парсит ответ LLM в формате "1. angle\n2. angle\n3. angle".
+     * Терпимо к мусору — если нет нумерации, пытается взять непустые строки.
+     */
+    private fun parseNumberedList(raw: String): List<String> {
+        return raw.lines()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .mapNotNull { line ->
+                // Убираем "1. ", "1) ", "- " и т.п.
+                val withoutPrefix = line
+                    .replace(Regex("^\\d+[.)]\\s+"), "")
+                    .replace(Regex("^[-*•]\\s+"), "")
+                if (withoutPrefix.isBlank()) null else withoutPrefix
+            }
+            .take(10)   // safety
     }
 }
 

@@ -39,6 +39,9 @@ class AssistantApp : Application() {
         instance = this
         settings = AssistantSettings(this)
         database = Room.databaseBuilder(this, AppDatabase::class.java, AppDatabase.NAME)
+            .addMigrations(AppDatabase.MIGRATION_1_2)
+            // Если что-то пойдёт не так с миграцией — лучше снести БД, чем крашить
+            // приложение (это dev-окружение, не production с реальными данными).
             .fallbackToDestructiveMigration()
             .build()
         apiClient = ApiClient()

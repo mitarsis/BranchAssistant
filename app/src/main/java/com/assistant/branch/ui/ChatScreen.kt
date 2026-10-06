@@ -309,14 +309,68 @@ fun ChatScreen(
                         }
                         if (state.branchForest.isEmpty()) {
                             item { EmptyState() }
-                        }
-                    }
-                }
+}
+    }
+}
+
+@Composable
+private fun ResearchProgressBar(
+    status: String,
+    active: Boolean,
+    onStop: () -> Unit,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 4.dp),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (active) {
+                androidx.compose.material3.CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 2.dp,
+                )
+                Spacer(Modifier.width(10.dp))
+            } else {
+                Icon(
+                    Icons.Outlined.AccountTree,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(10.dp))
+            }
+            Text(
+                text = if (status.isNotEmpty()) "Research: $status" else "Research",
+                modifier = Modifier.weight(1f),
+                color = TextHi,
+                style = MaterialTheme.typography.labelLarge,
+            )
+            if (active) {
+                TextButton(onClick = onStop) { Text("Стоп") }
+            }
+        }
+    }
+}
             }
 
             // InputBar показываем только в режиме списка чата. В режиме
             // дерева — без неё, иначе древо сжимается.
             if (viewMode == ViewMode.LIST) {
+                // Полоска research: показывается при researchActive или если есть
+                // результат (чтобы юзер видел последний статус).
+                if (state.researchActive || state.researchStatusText.isNotEmpty()) {
+                    ResearchProgressBar(
+                        status = state.researchStatusText,
+                        active = state.researchActive,
+                        onStop = { vm.stopResearch() },
+                    )
+                }
                 InputBar(
                     draft = state.draft,
                     listening = state.listening,
@@ -334,6 +388,17 @@ fun ChatScreen(
                     onStopMic = vm::stopListening,
                     onStopSpeak = vm::stopSpeaking,
                     voiceOverlay = voiceOverlay,
+                    onResearch = {
+                        // Берём seed из активной ветки — обычно это leaf,
+                        // т.е. последнее сообщение. Если активная ветка пуста,
+                        // берём весь draft.
+                        val seedId = state.activePath.lastOrNull()
+                        val seedText = seedId
+                            ?.let { id -> vm.messageForEdit(id) }
+                            ?: state.draft.trim()
+                        if (seedText.isBlank()) return@onResearch
+                        vm.startResearch(seedId!!, seedText)
+                    },
                 )
             }
         }
@@ -547,6 +612,7 @@ private fun InputBar(
     onStopMic: () -> Unit,
     onStopSpeak: () -> Unit,
     voiceOverlay: Boolean,
+    onResearch: () -> Unit = {},
 ) {
     // Бейдж «ответвление»: если long-press по AI-ноде, сюда прилетает parentId.
     if (branchFromId != null) {
@@ -641,6 +707,18 @@ private fun InputBar(
                 shape = RoundedCornerShape(22.dp),
             )
             Spacer(Modifier.width(8.dp))
+            IconButton(
+                onClick = onResearch,
+                enabled = !streaming && draft.isNotBlank(),
+                modifier = Modifier.size(48.dp),
+            ) {
+                Icon(
+                    Icons.Outlined.AccountTree,
+                    contentDescription = "Research",
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
+            Spacer(Modifier.width(4.dp))
             FilledIconButton(
                 onClick = {
                     if (streaming) onStop() else onSend()

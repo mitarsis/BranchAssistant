@@ -8,11 +8,13 @@ import com.assistant.branch.network.StreamEvent
 import com.assistant.branch.repo.ChatRepository
 import com.assistant.branch.repo.JevRouter
 import com.assistant.branch.repo.MessageNode
+import com.assistant.branch.repo.ResearchEvent
 import com.assistant.branch.settings.AssistantSettings
 import com.assistant.branch.settings.ModelEntry
 import com.assistant.branch.settings.RouteEntry
 import com.assistant.branch.voice.SttEngine
 import com.assistant.branch.voice.TtsEngine
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -42,6 +44,12 @@ data class ChatUiState(
     val editingMessageId: String? = null,
     // Черновик редактируемого сообщения.
     val editingDraft: String = "",
+    // === Research ===
+    val researchActive: Boolean = false,
+    val researchSeedId: String? = null,
+    val researchTopic: String = "",
+    val researchEvents: List<ResearchEvent> = emptyList(),
+    val researchStatusText: String = "",
 )
 
 class ChatViewModel(
@@ -244,6 +252,62 @@ class ChatViewModel(
     }
 
     private var currentJob: Job? = null
+    private var researchJob: Job? = null
+
+    /**
+     * Запустить research от seed-сообщения. Агент сгенерирует outline из
+     * разных углов, раскроет каждый и сделает synthesis. UI получает
+     * [ResearchEvent]ы через [_state.value.researchEvents].
+     */
+    fun startResearch(seedMessageId: String, seedTopic: String, breadth: Int = 3) {
+        val cid = _state.value.conversationId ?: return
+        researchJob?.cancel()
+        _state.update {
+            it.copy(
+                researchActive = true,
+                researchSeedId = seedMessageId,
+                researchTopic = seedTopic,
+                researchEvents = emptyList(),
+                researchStatusText = "Запуск…",
+            )
+        }
+        researchJob = viewModelScope.launch {
+            try {
+                repository.startResearch(cid, seedMessageId, seedTopic, breadth)
+                    .collect { ev -> handleResearchEvent(ev) }
+            } catch (e: CancellationException) {
+                // Юзер нажал стоп — это нормальный сценарий.
+                _state.update { it.copy(researchActive = false, researchStatusText = "Остановлено") }
+            } catch (e: Throwable) {
+                _state.update { it.copy(researchActive = false, researchStatusText = "Ошибка: ${e.message}") }
+            }
+        }
+    }
+
+    /** Прервать research в любой момент. */
+    fun stopResearch() {
+        researchJob?.cancel()
+    }
+
+    private fun handleResearchEvent(ev: ResearchEvent) {
+        val status = when (ev) {
+            is ResearchEvent.Started -> "Outline…"
+            is ResearchEvent.OutlineProposed -> "Outline готов (${ev.angles.size} углов)"
+            is ResearchEvent.BranchStarted -> "Раскрываю: ${ev.angle}…"
+            is ResearchEvent.BranchCompleted -> "Готово: ${ev.angle}"
+            is ResearchEvent.MessageCreated -> if (ev.isSuggestion) "+ suggestion" else "+ ответ"
+            is ResearchEvent.SynthesisReady -> "Synthesis готов"
+            is ResearchEvent.Completed -> "Research завершён"
+            is ResearchEvent.Aborted -> "Прервано: ${ev.reason}"
+        }
+        _state.update { st ->
+            st.copy(
+                researchEvents = st.researchEvents + ev,
+                researchStatusText = status,
+                researchActive = ev !is ResearchEvent.Completed && ev !is ResearchEvent.Aborted,
+            )
+        }
+    }
 
     fun regenerate(messageId: String) {
         if (_state.value.conversationId == null) return

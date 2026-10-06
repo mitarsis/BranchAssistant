@@ -20,7 +20,8 @@ import androidx.room.PrimaryKey
         Index("conversationId"),
         Index("parentId"),
         Index(value = ["conversationId", "createdAt"]),
-    ],
+        Index("origin"),
+    ]
 )
 data class Message(
     @PrimaryKey val id: String,
@@ -33,6 +34,18 @@ data class Message(
     @ColumnInfo val promptTokens: Int = 0,
     @ColumnInfo val completionTokens: Int = 0,
     @ColumnInfo val model: String? = null,
+    /**
+     * Флаг «это сгенерировал агент-исследователь». Помогает UI показывать
+     * предложения визуально отделёнными (серые/пунктирные рамки), пока юзер
+     * не принял/не отклонил. Поле не блокирует показ в дереве — только стилизует.
+     */
+    @ColumnInfo(defaultValue = "0") val isAgentSuggestion: Boolean = false,
+    /**
+     * Кто создал сообщение: "user" (юзер вручную), "agent" (исследователь).
+     * Нужно чтобы различать user-сообщения, написанные юзером, и user-сообщения,
+     * сгенерированные агентом как под-вопросы для дерева.
+     */
+    @ColumnInfo(defaultValue = "'user'") val origin: String = "user",
 ) {
     companion object {
         const val ROLE_USER = "user"
