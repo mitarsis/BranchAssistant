@@ -49,6 +49,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.assistant.branch.data.db.Message
+import com.assistant.branch.repo.MessageAuthor
 import com.assistant.branch.repo.MessageNode
 import com.assistant.branch.ui.theme.AssistantBubble
 import com.assistant.branch.ui.theme.BranchLine
@@ -187,13 +188,19 @@ private fun MessageRow(
     onSpeakMessage: () -> Unit,
 ) {
     val isUser = message.role == Message.ROLE_USER
+    val author = when {
+        message.isAgentSuggestion -> MessageAuthor.AGENT_SUGGESTION
+        message.origin == "agent" -> MessageAuthor.AGENT
+        isUser -> MessageAuthor.USER
+        else -> MessageAuthor.AI
+    }
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
         verticalAlignment = Alignment.Top,
     ) {
         if (!isUser) {
-            Avatar(author = node.author, isActive = isLeaf, isStreaming = message.isStreaming)
+            Avatar(author = author, isActive = isLeaf, isStreaming = message.isStreaming)
             Spacer(Modifier.width(8.dp))
         }
         // Сам пузырь — без fillMaxWidth(0.85f) на Column, чтобы Row правильно размерил дочерние элементы.
@@ -241,7 +248,7 @@ private fun MessageRow(
         }
         if (isUser) {
             Spacer(Modifier.width(8.dp))
-            Avatar(author = node.author, isActive = isLeaf, isStreaming = false)
+            Avatar(author = author, isActive = isLeaf, isStreaming = false)
         }
     }
 }
