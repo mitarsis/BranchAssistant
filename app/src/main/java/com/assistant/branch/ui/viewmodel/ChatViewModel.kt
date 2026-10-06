@@ -249,7 +249,7 @@ class ChatViewModel(
         val cid = _state.value.conversationId ?: return
         // Если у сообщения есть потомки, regenerate их cascade'нёт. Спрашиваем
         // подтверждения, чтобы юзер не терял контекст случайно.
-        val descendants = repository.descendantCount(cid, messageId)
+        val descendants = repository.descendantCount(messageId)
         if (descendants > 0) {
             _state.update { it.copy(pendingRegenerateId = messageId) }
             return
@@ -301,8 +301,7 @@ class ChatViewModel(
 
     /** Делегат для UI — посчитать descendants, чтобы показать в диалоге. */
     suspend fun descendantCountFor(messageId: String): Int {
-        val cid = _state.value.conversationId ?: return 0
-        return repository.descendantCount(cid, messageId)
+        return repository.descendantCount(messageId)
     }
 
     private fun runRegenerate(messageId: String) {
