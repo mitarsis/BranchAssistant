@@ -283,10 +283,7 @@ fun ChatScreen(
                                         isUser = n.message.role == com.assistant.branch.data.db.Message.ROLE_USER,
                                         isActive = n.message.id == state.activePath.lastOrNull(),
                                         isOnActivePath = n.message.id in state.activePath.toSet(),
-                                        source = when {
-                                            n.message.isAgentSuggestion -> "agent-suggestion"
-                                            else -> n.message.origin,
-                                        },
+                                        source = if (n.message.isAgentSuggestion) "agent-suggestion" else n.message.origin,
                                     )
                                 }
                             }
